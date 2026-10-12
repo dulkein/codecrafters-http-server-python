@@ -9,7 +9,7 @@ def main():
         with client_socket:
             request = client_socket.recv(4096)
             request_text = request.decode("utf-8", errors="replace")
-            request_line = request_text.split("\r\n", 1)[0]
+            request_line, _, remainder = request_text.partition("\r\n")
             parts = request_line.split(" ")
 
             if len(parts) < 2:
@@ -19,6 +19,24 @@ def main():
             elif parts[1].startswith("/echo/"):
                 value = parts[1][6:]
                 body = value.encode("utf-8")
+                response = (
+                    b"HTTP/1.1 200 OK\r\n"
+                    b"Content-Type: text/plain\r\n"
+                    + f"Content-Length: {len(body)}\r\n\r\n".encode("utf-8")
+                    + body
+                )
+            elif parts[1] == "/user-agent":
+                headers = remainder.split("\r\n")
+                user_agent = ""
+                for header in headers:
+                    if not header:
+                        break
+                    name, _, value = header.partition(":")
+                    if name.strip().lower() == "user-agent":
+                        user_agent = value.strip()
+                        break
+
+                body = user_agent.encode("utf-8")
                 response = (
                     b"HTTP/1.1 200 OK\r\n"
                     b"Content-Type: text/plain\r\n"

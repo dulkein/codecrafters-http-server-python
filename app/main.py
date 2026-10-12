@@ -6,10 +6,38 @@ import threading
 
 def handle_client(client_socket, root_dir):
     with client_socket:
-        request = client_socket.recv(4096)
-        request_text = request.decode("utf-8", errors="replace")
-        request_line, _, remainder = request_text.partition("\r\n")
+        request = b""
+        while b"\r\n\r\n" not in request:
+            chunk = client_socket.recv(4096)
+            if not chunk:
+                return
+            request += chunk
+
+        header_end = request.find(b"\r\n\r\n")
+        headers_raw = request[:header_end]
+        body = request[header_end + 4 :]
+
+        headers_text = headers_raw.decode("utf-8", errors="replace")
+        request_line, _, remainder = headers_text.partition("\r\n")
         parts = request_line.split(" ")
+
+        content_length = 0
+        for header in remainder.split("\r\n"):
+            if not header:
+                continue
+            name, _, value = header.partition(":")
+            if name.strip().lower() == "content-length":
+                try:
+                    content_length = int(value.strip())
+                except ValueError:
+                    content_length = 0
+                break
+
+        while len(body) < content_length:
+            chunk = client_socket.recv(4096)
+            if not chunk:
+                break
+            body += chunk
 
         if len(parts) < 2:
             response = b"HTTP/1.1 400 Bad Request\r\n\r\n"
@@ -42,6 +70,13 @@ def handle_client(client_socket, root_dir):
                 + f"Content-Length: {len(body)}\r\n\r\n".encode("utf-8")
                 + body
             )
+        elif parts[0] == "POST" and parts[1].startswith("/files/"):
+            filename = parts[1][7:]
+            file_path = os.path.join(root_dir, filename)
+            os.makedirs(root_dir, exist_ok=True)
+            with open(file_path, "wb") as f:
+                f.write(body[:content_length])
+            response = b"HTTP/1.1 201 Created\r\n\r\n"
         elif parts[1].startswith("/files/"):
             filename = parts[1][7:]
             file_path = os.path.join(root_dir, filename)
